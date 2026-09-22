@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+build/
+dist/
+release/*
+!release/1.0.3/
+!release/1.0.3/**
+artifacts/*
+!artifacts/*.png
+*.spec
+.test-data/
