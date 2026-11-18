@@ -2,13 +2,14 @@ import ctypes
 import tempfile
 import unittest
 from pathlib import Path
+from time import time
 
 from PySide6.QtCore import Qt, QPoint, QPointF, QEvent
 from PySide6.QtGui import QTextCursor, QWheelEvent
 from PySide6.QtTest import QTest
 
 from stickies.app import Controller,create_application
-from stickies.manager import Card,Settings
+from stickies.manager import CARDS_PER_BATCH, Card, ReminderDialog, Settings
 from stickies.platform import Hotkeys,parse_hotkey
 from stickies.store import Store
 
@@ -112,6 +113,81 @@ class InterfaceTests(unittest.TestCase):
         self.assertEqual(cards[0].note['id'],first)
         self.c.manager.select('收藏')
         self.assertEqual(len(self.c.manager.scroll.widget().findChildren(Card)),1)
+
+    def test_search_excerpt_and_keyboard_navigation_use_current_results(self):
+        first = self.c.create('第一张\n会议准备 coffee')
+        second = self.c.create('第二张\ncoffee 采购')
+        self.c.favorite(first)
+        self.c.windows[first].hide_note()
+        self.c.archive(second)
+        manager = self.c.manager
+        manager.search.setText('COFFEE')
+        QTest.keyClick(manager.search, Qt.Key_Down)
+        self.assertTrue(manager.result_cards[0].selected)
+        self.assertEqual(manager.result_cards[0].note['id'], first)
+        self.assertIn('会议准备 coffee', manager.result_cards[0].match_text)
+        QTest.keyClick(manager.search, Qt.Key_Down)
+        QTest.keyClick(manager.search, Qt.Key_Return)
+        self.assertTrue(self.c.windows[second].isVisible())
+        self.assertFalse(self.store.get(second)['archived'])
+        self.assertFalse(self.c.windows[first].isVisible())
+
+    def test_drawer_loads_more_cards_when_scrolling(self):
+        for i in range(CARDS_PER_BATCH + 5):
+            self.store.new(f'纸片 {i}')
+        manager = self.c.manager
+        manager.render()
+        self.app.processEvents()
+        self.assertEqual(len(manager.result_cards), CARDS_PER_BATCH)
+        scrollbar = manager.scroll.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+        self.assertEqual(len(manager.result_cards), CARDS_PER_BATCH + 5)
+
+    def test_reminder_updates_open_editor_and_opens_note_on_notification(self):
+        ident = self.c.create('提醒')
+        window = self.c.windows[ident]
+        window.editor.setPlainText('未保存的文字')
+        self.c.set_reminder(ident, int(time()) - 1)
+        self.c.check_reminders()
+        self.assertTrue(window.note['reminder_ready'])
+        window.editor.insertPlainText('还在编辑')
+        window.hide_note()
+        self.assertTrue(self.store.get(ident)['reminder_ready'])
+        self.c.open_reminder_notification()
+        self.assertTrue(window.isVisible())
+        self.assertNotIn('reminder_at', self.store.get(ident))
+        self.assertIn('还在编辑', self.store.get(ident)['plain'])
+
+    def test_archived_and_trashed_reminders(self):
+        first = self.c.create('归档一')
+        second = self.c.create('归档二')
+        trashed = self.c.create('删除')
+        for ident in (first, second, trashed):
+            self.c.set_reminder(ident, int(time()) - 1)
+        self.c.archive(first)
+        self.c.archive(second)
+        self.c.trash(trashed)
+        self.c.undo_trash()
+        self.c.check_reminders()
+        self.c.open_reminder_notification()
+        self.assertEqual(self.c.manager.mode, '提醒')
+        self.assertEqual({note['id'] for note, _ in self.c.manager.result_notes}, {first, second})
+        self.assertNotIn('reminder_at', self.store.get(trashed))
+        self.assertTrue(self.store.get(first)['archived'])
+        self.c.open_note(first)
+        self.assertNotIn('reminder_at', self.store.get(first))
+
+    def test_reminder_dialog_saves_and_removes_reminder(self):
+        ident = self.c.create('提醒设置')
+        dialog = ReminderDialog(self.store.get(ident), self.c.manager)
+        dialog.save_time()
+        self.assertEqual(dialog.result(), dialog.DialogCode.Accepted)
+        self.assertGreater(dialog.timestamp, int(time()))
+        self.c.set_reminder(ident, dialog.timestamp)
+        dialog = ReminderDialog(self.store.get(ident), self.c.manager)
+        self.assertEqual(dialog.when.dateTime().toSecsSinceEpoch(), self.store.get(ident)['reminder_at'])
+        self.c.set_reminder(ident, None)
+        self.assertNotIn('reminder_at', self.store.get(ident))
 
     def test_boss_key_restores_only_previously_visible_notes(self):
         a=self.c.create('A')

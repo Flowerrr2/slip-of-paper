@@ -74,6 +74,45 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(self.store.settings['font_size'],19)
         self.assertFalse(self.store.was_unclean)
 
+    def test_due_reminders_survive_restart_and_are_not_issued_twice(self):
+        old = self.store.new('旧版便签')
+        archived = self.store.new('归档提醒')
+        archived.update(reminder_at=100, archived=True)
+        self.store.save(archived)
+        future = self.store.new('未来提醒')
+        future['reminder_at'] = 200
+        self.store.save(future)
+        trashed = self.store.new('废纸篓')
+        trashed.update(reminder_at=80, deleted_at=datetime.now().isoformat())
+        self.store.save(trashed)
+
+        self.store.close()
+        self.store = Store(self.temp.name)
+        self.assertEqual(self.store.get(old['id']), old)
+        self.assertEqual([note['id'] for note in self.store.mark_due_reminders(100)],
+                         [archived['id']])
+        self.assertIs(self.store.get(archived['id'])['reminder_ready'], True)
+        self.assertEqual(self.store.mark_due_reminders(199), [])
+        self.store.close()
+        self.store = Store(self.temp.name)
+        self.assertEqual([note['id'] for note in self.store.mark_due_reminders(200)],
+                         [future['id']])
+
+    def test_export_import_clears_reminders_only_on_copies(self):
+        original = self.store.new('本地提醒')
+        original.update(reminder_at=100, reminder_ready=True)
+        self.store.save(original)
+        path = Path(self.temp.name) / 'reminders.stickybackup'
+        self.store.export_all(path)
+        self.assertEqual(self.store.import_all(path), 1)
+        copied = next(note for note in self.store.all() if note['id'] != original['id'])
+        self.assertNotIn('reminder_at', copied)
+        self.assertNotIn('reminder_ready', copied)
+        self.assertEqual(self.store.get(original['id']), original)
+        with closing(sqlite3.connect(self.store.backup())) as backup:
+            saved = backup.execute('SELECT data FROM notes WHERE id=?', (original['id'],)).fetchone()
+        self.assertTrue(json.loads(saved[0])['reminder_ready'])
+
     def test_unclean_marker(self):
         self.store.db.close()
         self.store=Store(self.temp.name)

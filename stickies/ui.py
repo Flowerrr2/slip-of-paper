@@ -16,17 +16,20 @@ from .store import COLORS, title, now
 from .icons import IconButton, brand_icon
 
 STYLE = '''
-QWidget { font-family: 'Microsoft YaHei UI'; font-size: 13px; color: #343C36; }
-QDialog, QMainWindow { background: #F8F7F2; }
+QWidget { font-family: 'Microsoft YaHei UI'; font-size: 13px; color: #283044; }
+QDialog, QMainWindow { background: #F8F8FB; }
 QLabel { background: transparent; }
 QPushButton, QToolButton { background: transparent; border: none; border-radius: 7px; padding: 7px 10px; }
-QPushButton:hover, QToolButton:hover { background: #E9EAE1; }
-QPushButton:checked { background: #E1E7D9; color: #3E5947; }
-QPushButton#primary { background: #425D4D; color: white; padding: 11px 19px; border-radius: 9px; }
-QPushButton#primary:hover { background: #314B3C; }
+QPushButton:hover, QToolButton:hover { background: #E4E7F0; }
+QPushButton:checked { background: #DDE3FA; color: #283C86; }
+QPushButton#primary { background: #4557A5; color: white; padding: 11px 19px; border-radius: 9px; }
+QPushButton#primary:hover { background: #354788; }
 QPushButton#danger { color: #AC4E42; }
-QLineEdit, QSpinBox, QComboBox, QKeySequenceEdit { background: #FFFFFF; border: 1px solid #DFE2D8; border-radius: 7px; padding: 8px; }
-QTextEdit { border: none; background: transparent; selection-background-color: #A1B8A1; }
+QLineEdit, QDateTimeEdit, QSpinBox, QComboBox, QKeySequenceEdit { background: #FFFFFF; border: 1px solid #D3D7E1; border-radius: 7px; padding: 8px; }
+QLineEdit:focus, QDateTimeEdit:focus, QComboBox:focus, QPushButton:focus { border:1px solid #6376BB; }
+QPushButton:pressed { background:#CDD4EA; }
+QTextEdit#captureEditor { background:white; border:1px solid #D3D7E1; border-radius:12px; padding:12px; }
+QTextEdit { border: none; background: transparent; selection-background-color: #BFCBF4; }
 QMenu { background: #FAF9F4; border: 1px solid #DADDD2; padding: 6px; }
 QMenu::item { padding: 8px 24px; border-radius: 4px; }
 QMenu::item:selected { background: #E5EBDC; }
@@ -36,19 +39,19 @@ QScrollBar::handle:vertical { background: #CBCFC4; border-radius: 3px; min-heigh
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QTabWidget::pane { border: none; padding-top: 16px; }
 QTabBar::tab { padding: 10px 17px; background: transparent; }
-QTabBar::tab:selected { color: #425D4D; border-bottom: 2px solid #425D4D; }
-QListWidget { border: 1px solid #DFE2D8; border-radius: 8px; background: white; padding: 8px; }
+QTabBar::tab:selected { color: #4557A5; border-bottom: 2px solid #4557A5; }
+QListWidget { border: 1px solid #D3D7E1; border-radius: 8px; background: white; padding: 8px; }
 QListWidget::item { padding: 10px; }
-QListWidget::item:selected { background: #E1E7D9; color: #343C36; }
+QListWidget::item:selected { background: #DDE3FA; color: #283044; }
 QCheckBox { spacing: 9px; }
 QCheckBox::indicator { width: 16px; height: 16px; }
 QCheckBox::indicator:unchecked { background: #FFFFFF; border: 1px solid #A5B09A; border-radius: 4px; }
-QCheckBox::indicator:checked { background: #425D4D; border: 3px solid #B7C7AB; border-radius: 4px; }
-QToolTip { background: #343C36; color: white; border: none; padding: 5px; }
+QCheckBox::indicator:checked { background: #4557A5; border: 3px solid #B7C7AB; border-radius: 4px; }
+QToolTip { background: #283044; color: white; border: none; padding: 5px; }
 '''
 
 
-def label(text, size=13, color='#343C36', bold=False):
+def label(text, size=13, color='#283044', bold=False):
     w = QLabel(text)
     w.setTextFormat(Qt.PlainText)
     w.setStyleSheet(f'font-size:{size}px; color:{color}; font-weight:{600 if bold else 400};')
@@ -295,7 +298,7 @@ class NoteWindow(QWidget):
         # toolbar's opacity effect when Qt renders the parent paper.
         outer.addWidget(self.paper)
         layout = QVBoxLayout(self.paper)
-        layout.setContentsMargins(13,6,13,7)
+        layout.setContentsMargins(16,7,16,8)
         layout.setSpacing(3)
         self.bar = DragBar(self)
         self.bar.setFixedHeight(29)
@@ -414,7 +417,7 @@ class NoteWindow(QWidget):
         self.paper.update()
         self.editor.ruled_skin = self.paper.skin
         self.editor.dark_paper = n['color'] == '夜色'
-        foreground='#F5F3E9' if n['color']=='夜色' else '#374034'
+        foreground='#F5F3E9' if n['color']=='夜色' else '#283044'
         self.editor.setStyleSheet(f'color:{foreground}; font-size:{n["font_size"]}pt;')
         self.editor.document().setDefaultFont(QFont('Microsoft YaHei UI',n['font_size']))
         self.editor.viewport().update()
@@ -585,6 +588,8 @@ class NoteWindow(QWidget):
         menu.addAction('复制全部',lambda:self.controller.app.clipboard().setText(self.editor.toPlainText()))
         menu.addAction('修改标题…',self.rename)
         menu.addAction('标签…',self.tags)
+        reminder_label = '修改提醒…' if self.note.get('reminder_at') else '设置提醒…'
+        menu.addAction(reminder_label, lambda: self.controller.edit_reminder(self.note['id'], self))
         menu.addSeparator()
         menu.addAction('更换颜色…',self.color_menu)
         size_menu=menu.addMenu(f'字号 · {self.note["font_size"]} pt')

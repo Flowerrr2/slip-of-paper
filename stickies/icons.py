@@ -6,7 +6,7 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap, QIcon
 from PySide6.QtWidgets import QPushButton
 
 
-def draw_symbol(p, name, rect, color='#52634F', active=False):
+def draw_symbol(p, name, rect, color='#515D71', active=False):
     p.save()
     p.translate(rect.x(), rect.y())
     p.scale(rect.width()/24, rect.height()/24)
@@ -43,6 +43,9 @@ def draw_symbol(p, name, rect, color='#52634F', active=False):
     elif name=='tag':
         line((4,4),(12,4),(21,13),(13,21),(4,12),(4,4))
         p.drawEllipse(QRectF(7,7,2,2))
+    elif name=='clock':
+        p.drawEllipse(QRectF(3,3,18,18))
+        line((12,7),(12,12),(16,14))
     elif name=='archive':
         box(3,4,18,5,1.5);line((5,9),(5,20),(19,20),(19,9));line((10,13),(14,13))
     elif name=='trash':
@@ -92,7 +95,7 @@ def draw_symbol(p, name, rect, color='#52634F', active=False):
     p.restore()
 
 
-def line_icon(name,color='#52634F',active=False):
+def line_icon(name,color='#515D71',active=False):
     result=QIcon()
     for size in (20,24,32,40,48,64):
         pixmap=QPixmap(size,size);pixmap.fill(Qt.transparent)
@@ -137,8 +140,8 @@ class IconButton(QPushButton):
         p=QPainter(self);p.setRenderHint(QPainter.Antialiasing)
         hovered=self.underMouse() and self.isEnabled()
         active=self.isChecked()
-        bg=QColor(255,255,255,22) if self.dark else QColor(255,255,255,65)
-        color='#E5EBDD' if self.dark else '#607055'
+        bg=QColor(255,255,255,22) if self.dark else QColor(255,255,255,20)
+        color='#E5EBDD' if self.dark else '#48546A'
         if active:
             bg=QColor('#EBD69C') if self.symbol=='star' else QColor('#CCDBBA')
             color='#8F6D27' if self.symbol=='star' else '#40573C'
@@ -146,11 +149,11 @@ class IconButton(QPushButton):
             bg=QColor(255,255,255,50) if self.dark else QColor(255,255,255,150)
             if self.danger:bg=QColor('#F2DAD1');color='#AB5149'
         if self.isDown():bg=QColor('#D1DBC3') if not self.danger else QColor('#E9C4BA')
-        p.setPen(QPen(QColor(100,115,90,25),1));p.setBrush(bg)
+        p.setPen(QPen(QColor(85,95,115,15),1));p.setBrush(bg)
         p.drawRoundedRect(QRectF(.5,.5,self.width()-1,self.height()-1),8,8)
         side=18 if self.width()<32 else 19
         draw_symbol(p,self.symbol,QRectF((self.width()-side)/2,(self.height()-side)/2,side,side),color,active)
         if self.hasFocus():
-            p.setBrush(Qt.NoBrush);p.setPen(QPen(QColor('#8FA580'),1,Qt.DotLine))
+            p.setBrush(Qt.NoBrush);p.setPen(QPen(QColor('#899FEA' if self.dark else '#5269B2'),2))
             p.drawRoundedRect(QRectF(2,2,self.width()-4,self.height()-4),6,6)
         p.end()

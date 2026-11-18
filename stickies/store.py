@@ -10,8 +10,8 @@ from pathlib import Path
 
 
 COLORS = {
-    '奶油黄': '#F7E7A6', '樱花粉': '#F2D4D7', '雾蓝': '#D3E5F0',
-    '鼠尾草': '#DFE8CE', '丁香紫': '#E5DDF1', '白纸': '#F8F6EF', '夜色': '#394443',
+    '奶油黄': '#FAEDC4', '樱花粉': '#F4DCDE', '雾蓝': '#DBE8F5',
+    '鼠尾草': '#E1EBD8', '丁香紫': '#E8E1F3', '白纸': '#FCFAF5', '夜色': '#313747',
 }
 DEFAULTS = dict(color='奶油黄', width=320, height=280, font_size=14,
                 opacity=100, snap=True, hover_toolbar=True, startup='保持上次状态',
@@ -80,6 +80,19 @@ class Store:
     def get(self, note_id):
         row = self.db.execute('SELECT data FROM notes WHERE id=?', (note_id,)).fetchone()
         return json.loads(row[0]) if row else None
+
+    def mark_due_reminders(self, timestamp):
+        with self.db:
+            rows = self.db.execute("""
+                UPDATE notes
+                SET data = json_set(data, '$.reminder_ready', json('true'))
+                WHERE json_extract(data, '$.deleted_at') IS NULL
+                    AND json_type(data, '$.reminder_at') = 'integer'
+                    AND json_extract(data, '$.reminder_at') <= ?
+                    AND COALESCE(json_extract(data, '$.reminder_ready'), 0) = 0
+                RETURNING data
+            """, (timestamp,)).fetchall()
+        return [json.loads(row[0]) for row in rows]
 
     def new(self, plain='', content=''):
         s = self.settings
@@ -172,6 +185,8 @@ class Store:
         with self.db:
             for raw in notes:
                 n = dict(raw, id=uuid.uuid4().hex, hidden=True, collapsed=False)
+                n.pop('reminder_at', None)
+                n.pop('reminder_ready', None)
                 for key, value in dict(title='', screen_id='', pinned=False, favorite=False,
                                        archived=False, deleted_at=None).items():
                     n.setdefault(key, value)

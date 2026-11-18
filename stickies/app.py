@@ -1,13 +1,12 @@
-import os
 import sys
-from datetime import datetime
+from time import monotonic, time
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QMessageBox
 
-from .store import Store, now
+from .store import Store, now, title
 from .ui import NoteWindow, icon, STYLE
-from .manager import Manager, Capture, Settings
+from .manager import Manager, Capture, Settings, ReminderDialog
 from .platform import Hotkeys
 
 
@@ -32,6 +31,8 @@ class Controller:
         self.hidden_batch=set()
         self.quitting=False
         self.testing=testing
+        self.reminder_notification = None
+        self.reminder_notification_until = 0
         self.manager=Manager(self)
         self.capture_window=Capture(self)
         self.tray=QSystemTrayIcon(icon(),app)
@@ -41,6 +42,7 @@ class Controller:
         menu.addAction('随手记',self.capture)
         menu.addAction('搜索便签',self.search)
         menu.addAction('所有便签',self.show_manager)
+        menu.addAction('提醒',self.show_reminders)
         menu.addSeparator()
         menu.addAction('显示全部',self.show_all)
         menu.addAction('隐藏全部',self.hide_all)
@@ -49,6 +51,7 @@ class Controller:
         menu.addAction('退出小纸片',self.quit)
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(self.tray_activated)
+        self.tray.messageClicked.connect(self.open_reminder_notification)
         # A delay distinguishes a single click from a double click on the tray.
         self.tray_click=QTimer(app)
         self.tray_click.setSingleShot(True)
@@ -85,6 +88,11 @@ class Controller:
         self.backup_timer.setInterval(60*60*1000)
         self.backup_timer.timeout.connect(self.maintenance)
         self.backup_timer.start()
+        self.reminder_timer = QTimer(app)
+        self.reminder_timer.setInterval(5000)
+        self.reminder_timer.timeout.connect(self.check_reminders)
+        self.reminder_timer.start()
+        self.check_reminders()
         app.aboutToQuit.connect(self.cleanup)
 
     def refresh(self):
@@ -106,6 +114,8 @@ class Controller:
             w=NoteWindow(self,note)
             self.windows[note_id]=w
         w.note.update(hidden=False,archived=False)
+        if focus and w.note.get('reminder_ready'):
+            self.update_reminder_fields(w.note, None)
         w.show()
         w.flush()
         if focus:
@@ -130,6 +140,7 @@ class Controller:
         if not note: return
         self.last_deleted=note_id
         note['deleted_at']=now()
+        self.update_reminder_fields(note, None)
         self.store.save(note)
         self.refresh()
         self.toast('便签已丢进废纸篓，30 天内可以捡回来。',True)
@@ -172,6 +183,68 @@ class Controller:
             note['favorite']=not note['favorite']
             self.store.save(note)
         self.refresh()
+
+    @staticmethod
+    def update_reminder_fields(note, timestamp):
+        if timestamp is None:
+            note.pop('reminder_at', None)
+            note.pop('reminder_ready', None)
+        else:
+            note.update(reminder_at=timestamp, reminder_ready=False)
+
+    def edit_reminder(self, note_id, parent):
+        note = self.store.get(note_id)
+        if not note or note['deleted_at']:
+            return
+        dialog = ReminderDialog(note, parent)
+        if dialog.exec():
+            self.set_reminder(note_id, dialog.timestamp)
+
+    def set_reminder(self, note_id, timestamp):
+        window = self.windows.get(note_id)
+        if window:
+            self.update_reminder_fields(window.note, timestamp)
+            window.flush()
+        else:
+            note = self.store.get(note_id)
+            if not note or note['deleted_at']:
+                return
+            self.update_reminder_fields(note, timestamp)
+            self.store.save(note)
+            self.refresh()
+
+    def check_reminders(self):
+        due = self.store.mark_due_reminders(int(time()))
+        if not due:
+            return
+        for note in due:
+            window = self.windows.get(note['id'])
+            if window:
+                window.note['reminder_ready'] = True
+        self.refresh()
+        ready = [note for note in self.store.all()
+                 if note.get('reminder_ready') and not note['deleted_at']]
+        self.reminder_notification = ready[0]['id'] if len(ready) == 1 else ''
+        self.reminder_notification_until = monotonic() + 10
+        message = title(ready[0]) if len(ready) == 1 else f'有 {len(ready)} 张便签到点了，点击查看。'
+        self.manager.toast('有便签到点了，可在「提醒」中查看。')
+        if not self.testing:
+            self.tray.showMessage('小纸片提醒', message, QSystemTrayIcon.Information, 10000)
+
+    def open_reminder_notification(self):
+        note_id = self.reminder_notification
+        if note_id is None:
+            return
+        self.reminder_notification = None
+        note = self.store.get(note_id) if note_id else None
+        if note and note.get('reminder_ready') and not note['deleted_at']:
+            self.open_note(note_id)
+        else:
+            self.show_reminders()
+
+    def show_reminders(self):
+        self.manager.select('提醒')
+        self.show_manager()
 
     def show_manager(self):
         self.manager.render()
@@ -225,7 +298,9 @@ class Controller:
 
     def toast(self,text,undo=False):
         self.manager.toast(text,undo)
-        if not self.manager.isVisible() and not self.testing:
+        if (not self.manager.isVisible() and not self.testing
+                and monotonic() >= self.reminder_notification_until):
+            self.reminder_notification = None
             self.tray.showMessage('小纸片',text,QSystemTrayIcon.Information,3000)
 
     def error(self,text):
@@ -253,6 +328,7 @@ class Controller:
         if self.quitting: return
         self.quitting=True
         self.backup_timer.stop()
+        self.reminder_timer.stop()
         self.flush_all()
         # Preserve an unfinished capture draft even during a normal exit.
         if self.capture_window.editor.toPlainText().strip():
@@ -278,6 +354,7 @@ def create_application():
     app.setApplicationDisplayName('小纸片')
     app.setOrganizationName('LittlePaper')
     app.setQuitOnLastWindowClosed(False)
+    app.styleHints().setColorScheme(Qt.ColorScheme.Light)
     app.setStyle('Fusion')
     app.setStyleSheet(STYLE)
     app.setWindowIcon(icon())

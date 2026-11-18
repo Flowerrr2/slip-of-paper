@@ -4,9 +4,17 @@ A quiet, fast, fully offline sticky-note tool for the Windows desktop.
 
 It is designed to feel like a real piece of paper rather than a heavy note-taking system: press a shortcut, write immediately, and leave without pressing Save.
 
-[中文 README](README.md) · [User guide](使用说明.md) · [Latest Windows build](release/1.0.3/小纸片-Windows-x64.zip)
+[中文 README](README.md) · [User guide](使用说明.md) · [Latest Windows build](https://github.com/Flowerrr2/slip-of-paper/releases/download/v1.1.2/Slip-of-Paper-1.1.2-Windows-x64.zip)
 
 ![Slip of Paper manager](artifacts/manager.png)
+
+## Screenshots
+
+<table>
+<tr><td valign="top">Desktop checklist<br><img src="artifacts/note.png" alt="Desktop checklist" width="390"></td><td valign="top">Quick capture draft<br><img src="artifacts/capture.png" alt="Quick capture draft" width="390"></td></tr>
+<tr><td valign="top">Set a reminder<br><img src="artifacts/reminder.png" alt="Set a reminder" width="390"></td><td valign="top">Choose a date<br><img src="artifacts/reminder-calendar.png" alt="Choose a date" width="390"></td></tr>
+<tr><td valign="top">Search by tag and select a result<br><img src="artifacts/search.png" alt="Search by tag and select a result" width="390"></td><td valign="top">Configure startup and window behavior<br><img src="artifacts/settings.png" alt="Configure startup and window behavior" width="390"></td></tr>
+</table>
 
 ## Features
 
@@ -18,14 +26,15 @@ It is designed to feel like a real piece of paper rather than a heavy note-takin
 - Pinning, opacity, font-size controls, Ctrl + mouse-wheel font sizing, and “put back in drawer”
 - Windows tray integration and global shortcuts for showing or hiding all notes
 - Local safeguards: version snapshots, daily backups, import/export, and crash recovery
+- One-time local reminders from desktop notes and drawer cards
 - Hand-drawn paper visual language with a custom paper logo, line icons, and ruled paper
 
 ## Download and run
 
-Download [小纸片-Windows-x64.zip](release/1.0.3/小纸片-Windows-x64.zip), extract it, and run:
+Download [Slip-of-Paper-1.1.2-Windows-x64.zip](https://github.com/Flowerrr2/slip-of-paper/releases/download/v1.1.2/Slip-of-Paper-1.1.2-Windows-x64.zip), extract it, and run:
 
 ```text
-release/1.0.3/小纸片/小纸片.exe
+小纸片/小纸片.exe
 ```
 
 This is a portable folder build. Keep the complete `小纸片` folder together; do not copy only the executable. You can also double-click `启动小纸片.cmd` in the repository root.
@@ -72,8 +81,8 @@ Run the test suite:
 Build and smoke-test the latest release:
 
 ```powershell
-.\.venv\Scripts\python.exe tools\build.py --output release/1.0.3
-.\.venv\Scripts\python.exe tools\check_release.py --output release/1.0.3
+.\.venv\Scripts\python.exe tools\build.py --output release/1.1.2
+.\.venv\Scripts\python.exe tools\check_release.py --output release/1.1.2
 ```
 
 ## Project layout
@@ -91,9 +100,9 @@ Build and smoke-test the latest release:
 
 ## Current release
 
-Version 1.0.3 adds a direct “put back in drawer” button to each desktop note. The current test suite covers 23 scenarios, including autosave, font and ruled-line alignment, Ctrl + mouse-wheel sizing, archive recovery, single-instance behavior, restart persistence, and SQLite integrity.
+Version 1.1.2 refreshes the drawer, desktop notes, and quick capture. Version 1.1.0 added one-time local reminders, search excerpts, and keyboard navigation for search results. The drawer loads cards in batches as you scroll.
 
-Reminders, image notes, OCR, cloud sync, Windows Hello locking, and AI organization are planned for later versions.
+Recurring reminders, image notes, OCR, cloud sync, Windows Hello locking, and AI organization are planned for later versions.
 
 ## License and third-party components
 

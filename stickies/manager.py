@@ -1,22 +1,51 @@
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, QUrl, QSize
-from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
+from PySide6.QtCore import Qt, QTimer, QUrl, QSize, QDateTime, QTime, QEvent, QRectF
+from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut, QPainter, QColor, QPen, QFontMetrics, QTextCharFormat
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLineEdit, QScrollArea, QFrame, QDialog, QTabWidget, QFormLayout, QComboBox,
-    QSpinBox, QCheckBox, QKeySequenceEdit, QFileDialog, QMessageBox, QInputDialog)
+    QSpinBox, QCheckBox, QKeySequenceEdit, QFileDialog, QMessageBox, QInputDialog,
+    QDateTimeEdit, QCalendarWidget)
 
+from . import __version__
 from .store import COLORS, title, pending
 from .ui import label, button, Paper, Editor, icon
 from .icons import IconButton, line_icon
 from .platform import HOTKEY_NAMES, autostart_enabled, set_autostart
 
 
+CARDS_PER_BATCH = 24
+
+
+def search_excerpt(note, query):
+    tags = ' '.join(note['tags'])
+    fields = [('标题', title(note)), ('正文', note['plain']), ('标签', tags)]
+    combined = ' '.join(text for _, text in fields)
+    if query not in combined.casefold():
+        return ''
+    for field, text in fields + [('内容', combined)]:
+        folded = text.casefold()
+        offset = folded.find(query)
+        if offset < 0:
+            continue
+        if len(text) != len(folded):
+            for index, character in enumerate(text):
+                if offset < len(character.casefold()):
+                    offset = index
+                    break
+                offset -= len(character.casefold())
+        start = max(0, offset - 12)
+        excerpt = ' '.join(text[start:offset + len(query) + 48].split())
+        return f'{field} · ' + ('…' if start else '') + excerpt
+    return ''
+
+
 class Card(Paper):
-    def __init__(self,controller,note,mode):
+    def __init__(self,controller,note,mode,match=''):
         super().__init__(note['color'],'经典')
         self.controller, self.note=controller,note
+        self.selected = False
         self.setMinimumHeight(230)
         self.setMaximumHeight(260)
         self.setCursor(Qt.PointingHandCursor)
@@ -24,8 +53,8 @@ class Card(Paper):
         layout=QVBoxLayout(self)
         layout.setContentsMargins(20,16,16,10)
         top=QHBoxLayout()
-        foreground='#F5F3E9' if note['color']=='夜色' else '#374034'
-        heading=label(title(note),15,foreground,True)
+        foreground='#F5F3E9' if note['color']=='夜色' else '#283044'
+        heading=label(title(note),17,foreground,True)
         heading.setWordWrap(True)
         heading.setMaximumHeight(46)
         top.addWidget(heading,1)
@@ -44,6 +73,12 @@ class Card(Paper):
         preview.setAlignment(Qt.AlignTop)
         preview.setMaximumHeight(96)
         layout.addWidget(preview,1)
+        if match:
+            self.match = label('', 11, foreground)
+            self.match.setMinimumWidth(0)
+            self.match.setToolTip(match)
+            self.match_text = match
+            layout.addWidget(self.match)
         tags='  '.join('#'+t for t in note['tags'])
         meta=label((tags[:32]+'   ' if tags else '') + (f'☐ {pending(note)} 项待办' if pending(note) else ''),10,foreground)
         layout.addWidget(meta)
@@ -51,6 +86,18 @@ class Card(Paper):
         foot.setSpacing(6)
         foot.addWidget(label(datetime.fromisoformat(note['updated_at']).strftime('%m 月 %d 日'),10,foreground))
         foot.addStretch()
+        if not note['deleted_at']:
+            reminder = '修改提醒' if note.get('reminder_at') else '设置提醒'
+            clock = IconButton('clock', lambda: controller.edit_reminder(note['id'], controller.manager),
+                               reminder, dark=note['color']=='夜色')
+            if note.get('reminder_at'):
+                clock.setCheckable(True)
+                clock.setChecked(True)
+                when = QDateTime.fromSecsSinceEpoch(note['reminder_at']).toString('M 月 d 日 HH:mm')
+                status = '待查看' if note.get('reminder_ready') else when
+                layout.addWidget(label('提醒 · ' + status, 11, foreground))
+                clock.setToolTip(f'{reminder} · {status}')
+            foot.addWidget(clock)
         if note['deleted_at']:
             foot.addWidget(button('恢复',lambda:controller.restore(note['id'])))
             remove=button('永久删除',lambda:controller.permanent_delete(note['id']))
@@ -65,9 +112,137 @@ class Card(Paper):
             foot.addWidget(IconButton('trash',lambda:controller.trash(note['id']),'丢进废纸篓',danger=True,dark=note['color']=='夜色'))
         layout.addLayout(foot)
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, 'match'):
+            width = self.width() - 36
+            self.match.setText(QFontMetrics(self.match.font()).elidedText(
+                self.match_text, Qt.ElideRight, width))
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.selected:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setPen(QPen(QColor('#BDD4B6' if self.color == '夜色' else '#425D4D'), 2))
+            painter.drawRoundedRect(QRectF(self.rect()).adjusted(2, 2, -2, -2), 10, 10)
+
     def mouseDoubleClickEvent(self,event):
         if not self.note['deleted_at']:
             self.controller.open_note(self.note['id'])
+
+
+class ReminderCalendar(QCalendarWidget):
+    def paintCell(self, painter, rect, date):
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        selected = date == self.selectedDate()
+        if selected:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor('#4557A5'))
+            painter.drawRoundedRect(QRectF(rect).adjusted(2, 1, -2, -1), 6, 6)
+        color = '#283044'
+        if date < self.minimumDate() or date > self.maximumDate():
+            color = '#9198A7'
+        elif date.month() != self.monthShown() or date.dayOfWeek() >= 6:
+            color = '#526590'
+        painter.setPen(QColor('#FFFFFF' if selected else color))
+        painter.drawText(rect, Qt.AlignCenter, str(date.day()))
+        painter.restore()
+
+
+class ReminderTimeEdit(QDateTimeEdit):
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setClipRect(self.width() - 28, 0, 28, self.height())
+        painter.fillRect(self.rect(), QColor('#F8F8FB'))
+        painter.setBrush(QColor('#FFFFFF'))
+        painter.setPen(QColor('#6376BB' if self.hasFocus() else '#D3D7E1'))
+        painter.drawRoundedRect(QRectF(self.rect()).adjusted(.5, .5, -.5, -.5), 7, 7)
+        painter.setPen(QPen(QColor('#566174'), 1.5, Qt.SolidLine, Qt.RoundCap))
+        x, y = self.width() - 14, self.height() // 2
+        painter.drawLine(x - 4, y - 2, x, y + 2)
+        painter.drawLine(x, y + 2, x + 4, y - 2)
+
+
+class ReminderDialog(QDialog):
+    def __init__(self, note, parent):
+        super().__init__(parent)
+        self.setWindowTitle('便签提醒')
+        self.timestamp = None
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 18, 22, 18)
+        layout.setSpacing(12)
+        self.setMinimumWidth(345)
+        heading = label(title(note), 19, bold=True)
+        heading.setWordWrap(True)
+        layout.addWidget(heading)
+        presets = QHBoxLayout()
+        presets.addWidget(button('30 分钟后', lambda: self.when.setDateTime(
+            QDateTime.currentDateTime().addSecs(30 * 60))))
+        presets.addWidget(button('明天上午 9 点', lambda: self.when.setDateTime(
+            QDateTime(QDateTime.currentDateTime().date().addDays(1), QTime(9, 0)))))
+        layout.addLayout(presets)
+        for index in range(presets.count()):
+            presets.itemAt(index).widget().setStyleSheet(
+                'QPushButton { background:#EBEEF7; color:#354677; }'
+                'QPushButton:hover { background:#DDE3FA; }')
+        self.when = ReminderTimeEdit()
+        self.when.setDisplayFormat('yyyy-MM-dd HH:mm')
+        self.when.setCalendarPopup(True)
+        self.when.setCalendarWidget(ReminderCalendar())
+        calendar = self.when.calendarWidget()
+        calendar.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)
+        calendar.setFirstDayOfWeek(Qt.Monday)
+        calendar.setMinimumWidth(300)
+        weekend = QTextCharFormat()
+        weekend.setForeground(QColor('#526590'))
+        for day in (Qt.Saturday, Qt.Sunday):
+            calendar.setWeekdayTextFormat(day, weekend)
+        calendar.setStyleSheet("""
+            QCalendarWidget { background:#FFFFFF; border:1px solid #D3D7E1; }
+            QWidget#qt_calendar_navigationbar { background:#EDF0F8; }
+            QCalendarWidget QToolButton { background:transparent; color:#283044;
+                padding:4px 7px; min-height:24px; }
+            QCalendarWidget QToolButton:hover { background:#DDE3FA; }
+            QCalendarWidget QAbstractItemView { background:#FFFFFF;
+                alternate-background-color:#F4F5F9; color:#283044; border:0;
+                selection-background-color:#4557A5; selection-color:white; }
+            QDateTimeEdit::drop-down { width:28px; border:0; background:transparent; }
+            QDateTimeEdit::down-arrow { image:none; width:0; height:0; }
+        """)
+        self.when.setStyleSheet("""
+            QDateTimeEdit, QDateTimeEdit QLineEdit {
+                selection-background-color:#4557A5; selection-color:white; }
+        """)
+        current = QDateTime.currentDateTime()
+        self.when.setMinimumDateTime(current.addSecs(-current.time().second()))
+        initial = QDateTime.fromSecsSinceEpoch(note.get('reminder_at') or 0)
+        self.when.setDateTime(initial if initial > current else current.addSecs(30 * 60))
+        self.when.setAccessibleName('提醒时间')
+        layout.addWidget(label('提醒时间', 12, '#566174'))
+        layout.addWidget(self.when)
+        layout.addWidget(label('完全退出后，逾期提醒会在下次启动时提示。', 11))
+        actions = QHBoxLayout()
+        if note.get('reminder_at'):
+            actions.addWidget(button('移除提醒', self.accept))
+        actions.addStretch()
+        actions.addWidget(button('取消', self.reject))
+        save = button('保存', self.save_time, primary=True)
+        save.setDefault(True)
+        actions.addWidget(save)
+        layout.addLayout(actions)
+
+    def save_time(self):
+        chosen = self.when.dateTime()
+        timestamp = chosen.toSecsSinceEpoch() - chosen.time().second()
+        if timestamp <= QDateTime.currentSecsSinceEpoch():
+            QMessageBox.information(self, '便签提醒', '请选择一个将来的时间。')
+            return
+        self.timestamp = timestamp
+        self.accept()
 
 
 class Manager(QMainWindow):
@@ -75,6 +250,11 @@ class Manager(QMainWindow):
         super().__init__()
         self.controller=controller
         self.mode='所有便签'
+        self.result_notes = []
+        self.result_cards = []
+        self.selected_result = -1
+        self.render_key = None
+        self.rendering_cards = False
         self.setWindowTitle('小纸片 · 便签抽屉')
         self.setWindowIcon(icon())
         self.resize(1100,760)
@@ -90,24 +270,25 @@ class Manager(QMainWindow):
         layout.setSpacing(0)
         sidebar=QFrame()
         sidebar.setFixedWidth(206)
-        sidebar.setStyleSheet('QFrame {background:#EEEFE7; border:none;}')
+        sidebar.setObjectName('libraryRail')
+        sidebar.setStyleSheet('QFrame#libraryRail {background:#EBEDF2; border-right:1px solid #DADDE5;}')
         side=QVBoxLayout(sidebar)
-        side.setContentsMargins(22,32,18,24)
+        side.setContentsMargins(18,28,16,20)
         brand=QHBoxLayout()
         stamp=label('')
         stamp.setFixedSize(42,42)
         stamp.setPixmap(icon().pixmap(QSize(42,42),self.devicePixelRatioF()))
         brand.setSpacing(10)
         brand.addWidget(stamp)
-        brand.addWidget(label('小纸片',22,'#354B3A',True))
+        brand.addWidget(label('小纸片',22,'#20283A',True))
         brand.addStretch()
         side.addLayout(brand)
-        side.addWidget(label('留住一闪而过的想法',11,'#8C9485'))
+
         side.addSpacing(35)
-        side.addWidget(label('我的抽屉',10,'#949C8D'))
+        side.addWidget(label('资料库',12,'#576173',True))
         side.addSpacing(8)
         self.navigation={}
-        for glyph, name in [('notes','所有便签'),('today','今日'),('star','收藏'),('todo','待办'),('tag','标签'),('archive','已归档'),('trash','回收站')]:
+        for glyph, name in [('notes','所有便签'),('today','今日'),('star','收藏'),('todo','待办'),('clock','提醒'),('tag','标签'),('archive','已归档'),('trash','回收站')]:
             if name=='已归档':
                 side.addSpacing(22)
             b=button('  '+name,lambda checked=False,m=name:self.select(m))
@@ -120,14 +301,14 @@ class Manager(QMainWindow):
             side.addWidget(b)
             self.navigation[name]=b
         side.addStretch()
-        side.addWidget(label('一张纸，也装得下好想法。',10,'#909887'))
+
         side.addSpacing(12)
         preferences=button('  偏好设置',controller.show_settings)
         preferences.setIcon(line_icon('settings'))
         preferences.setIconSize(QSize(20,20))
         preferences.setStyleSheet('text-align:left; padding-left:14px;')
         side.addWidget(preferences)
-        side.addWidget(label('●  只在这台电脑，安心记录',10,'#6C8265'))
+
         layout.addWidget(sidebar)
         content=QWidget()
         main=QVBoxLayout(content)
@@ -135,27 +316,29 @@ class Manager(QMainWindow):
         main.setSpacing(18)
         top=QHBoxLayout()
         self.search=QLineEdit()
-        self.search.setPlaceholderText('搜索纸片上的文字、标题或标签…')
+        self.search.setPlaceholderText('搜索标题、正文或标签')
         self.search.setClearButtonEnabled(True)
         self.search.setMinimumHeight(42)
         self.search.textChanged.connect(self.schedule)
+        self.search.installEventFilter(self)
         top.addWidget(self.search,1)
         top.addSpacing(12)
-        create_button=button(' 拿一张纸',lambda:controller.create(),'Ctrl+Alt+N',True)
+        create_button=button(' 新建便签',lambda:controller.create(),'Ctrl+Alt+N',True)
         create_button.setIcon(line_icon('plus','#FFFFFF'))
         create_button.setIconSize(QSize(18,18))
         top.addWidget(create_button)
-        main.addLayout(top)
+
         heading=QHBoxLayout()
         copy=QVBoxLayout()
-        self.heading=label('所有便签',27,'#343E34',True)
-        self.subtitle=label('不必整理得井井有条，先把想法留下。',12,'#8A9285')
+        self.heading=label('所有便签',32,'#20283A',True)
+        self.subtitle=label('',12,'#566174')
         copy.addWidget(self.heading)
         copy.addWidget(self.subtitle)
         heading.addLayout(copy,1)
-        self.count=label('',12,'#8A9285')
+        self.count=label('',12,'#515B70')
         heading.addWidget(self.count)
         main.addLayout(heading)
+        main.addLayout(top)
         self.tag_filter=QComboBox()
         self.tag_filter.currentTextChanged.connect(self.schedule)
         self.tag_filter.hide()
@@ -163,6 +346,7 @@ class Manager(QMainWindow):
         self.scroll=QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll.verticalScrollBar().valueChanged.connect(self.load_near_bottom)
         main.addWidget(self.scroll,1)
         self.notice=QFrame()
         self.notice.setStyleSheet('QFrame {background:#E9EDDF; border-radius:8px;}')
@@ -176,11 +360,6 @@ class Manager(QMainWindow):
         self.notice_timer=QTimer(self)
         self.notice_timer.setSingleShot(True)
         self.notice_timer.timeout.connect(self.notice.hide)
-        bottom=QHBoxLayout()
-        bottom.addWidget(label('Ctrl + Alt + N  新建    /    Ctrl + Alt + Space  随手记',10,'#939A8D'))
-        bottom.addStretch()
-        bottom.addWidget(label('小纸片  /  1.0.3',10,'#939A8D'))
-        main.addLayout(bottom)
         layout.addWidget(content,1)
         self.new_shortcut=QShortcut(QKeySequence('Ctrl+N'),self)
         self.new_shortcut.activated.connect(lambda:controller.create())
@@ -207,10 +386,15 @@ class Manager(QMainWindow):
             self.refresh_timer.start()
 
     def render(self):
-        self.heading.setText(self.mode if not self.search.text() else '找到这些小纸片')
-        self.subtitle.setText({'回收站':'丢掉的想法，30 天内都能捡回来。','已归档':'暂时收好，需要时再拿出来。',
-                               '待办':'一件一件来，慢慢划掉。','收藏':'值得常常回看的那些小事。',
-                               '今日':'今天的想法，还带着新鲜的温度。','标签':'给零散的想法，一个轻巧的记号。'}.get(self.mode,'不必整理得井井有条，先把想法留下。'))
+        self.refresh_timer.stop()
+        self.heading.setText(self.mode if not self.search.text() else '搜索结果')
+        hint = {'回收站': '便签保留 30 天，可在这里恢复。', '已归档': '双击便签即可放回桌面。',
+                '提醒': '到期的提醒排在最前面。', '今日': '今天创建或编辑过的便签。',
+                '待办': '包含未完成事项的便签。'}.get(self.mode, '')
+        if self.search.text().strip() and self.mode != '回收站':
+            hint = '↑ ↓ 选择便签　 Enter 打开　 Esc 清除搜索'
+        self.subtitle.setText(hint)
+        self.subtitle.setVisible(bool(hint))
         for name,b in self.navigation.items():
             b.setChecked(name==self.mode)
         query=self.search.text().strip().casefold()
@@ -222,28 +406,51 @@ class Manager(QMainWindow):
                 if n['deleted_at']: continue
                 if self.mode=='已归档':
                     if not n['archived']: continue
+                elif self.mode=='提醒':
+                    if not n.get('reminder_at'): continue
                 elif n['archived'] and not (self.mode=='所有便签' and query): continue
                 if self.mode=='收藏' and not n['favorite']: continue
                 if self.mode=='待办' and not pending(n): continue
                 if self.mode=='今日' and n['updated_at'][:10]!=datetime.now().date().isoformat() and n['created_at'][:10]!=datetime.now().date().isoformat(): continue
                 if self.mode=='标签' and self.tag_filter.currentIndex()>0 and self.tag_filter.currentText() not in n['tags']: continue
-            if query and query not in (title(n)+' '+n['plain']+' '+' '.join(n['tags'])).casefold(): continue
-            notes.append(n)
-        notes.sort(key=lambda n:(n['favorite'],n['updated_at']),reverse=True)
+            excerpt = search_excerpt(n, query) if query else ''
+            if not query or excerpt:
+                notes.append((n, excerpt))
+        if self.mode == '提醒':
+            notes.sort(key=lambda item: (not item[0].get('reminder_ready'), item[0]['reminder_at']))
+        else:
+            notes.sort(key=lambda item: (item[0]['favorite'], item[0]['updated_at']), reverse=True)
         self.count.setText(f'{len(notes)} 张纸片')
+        columns = max(2, (self.width() - 290) // 270)
+        key = (self.mode, query, self.tag_filter.currentIndex(), columns)
+        if key == self.render_key and notes == self.result_notes:
+            return
+
+        same_filter = self.render_key is not None and key[:3] == self.render_key[:3]
+        scrollbar = self.scroll.verticalScrollBar()
+        scroll_position = scrollbar.value() if same_filter else 0
+        loaded = max(CARDS_PER_BATCH, len(self.result_cards)) if scroll_position else CARDS_PER_BATCH
+        selected_id = None
+        if same_filter and self.selected_result >= 0:
+            selected_id = self.result_notes[self.selected_result][0]['id']
+        self.render_key = key
+        self.result_notes = notes
+        self.result_cards = []
+        self.selected_result = -1
+        self.columns = columns
+        self.rendering_cards = True
         container=QWidget()
         container.setStyleSheet('background:transparent;')
         grid=QGridLayout(container)
+        self.result_grid = grid
         grid.setContentsMargins(0,2,8,12)
         grid.setHorizontalSpacing(18)
         grid.setVerticalSpacing(18)
-        columns=max(2,(self.width()-290)//270)
         if notes:
-            for i,n in enumerate(notes):
-                grid.addWidget(Card(self.controller,n,self.mode),i//columns,i%columns)
+            grid.setAlignment(Qt.AlignTop)
             for col in range(columns):
                 grid.setColumnStretch(col,1)
-            grid.setRowStretch((len(notes)-1)//columns+1,1)
+            self.append_cards(loaded)
         else:
             empty=QWidget()
             center=QVBoxLayout(empty)
@@ -263,6 +470,65 @@ class Manager(QMainWindow):
         old=self.scroll.takeWidget()
         self.scroll.setWidget(container)
         if old: old.deleteLater()
+        scrollbar.setValue(scroll_position)
+        self.rendering_cards = False
+        if selected_id:
+            index = next((i for i, (note, _) in enumerate(notes) if note['id'] == selected_id), -1)
+            if index >= 0:
+                self.select_result(index)
+
+    def append_cards(self, count):
+        first = len(self.result_cards)
+        stop = min(first + count, len(self.result_notes))
+        for index in range(first, stop):
+            note, excerpt = self.result_notes[index]
+            card = Card(self.controller, note, self.mode, excerpt)
+            self.result_cards.append(card)
+            self.result_grid.addWidget(card, index // self.columns, index % self.columns)
+
+    def load_near_bottom(self, value):
+        scrollbar = self.scroll.verticalScrollBar()
+        if not self.rendering_cards and scrollbar.maximum() - value <= 260:
+            self.rendering_cards = True
+            self.append_cards(CARDS_PER_BATCH)
+            self.rendering_cards = False
+
+    def select_result(self, index):
+        if self.selected_result >= 0:
+            previous = self.result_cards[self.selected_result]
+            previous.selected = False
+            previous.update()
+        if index >= len(self.result_cards):
+            self.append_cards(max(CARDS_PER_BATCH, index + 1 - len(self.result_cards)))
+        self.selected_result = index
+        card = self.result_cards[index]
+        card.selected = True
+        card.update()
+        self.scroll.ensureWidgetVisible(card)
+
+    def eventFilter(self, watched, event):
+        if watched is self.search and event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape and self.search.text():
+            self.search.clear()
+            self.render()
+            return True
+        if (watched is self.search and event.type() == QEvent.KeyPress
+                and event.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)
+                and self.search.text().strip() and self.mode != '回收站'):
+            key = event.key()
+            if key in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Return, Qt.Key_Enter):
+                if self.refresh_timer.isActive():
+                    self.render()
+                if not self.result_notes:
+                    return True
+                if key in (Qt.Key_Return, Qt.Key_Enter):
+                    note, _ = self.result_notes[max(0, self.selected_result)]
+                    self.controller.open_note(note['id'])
+                else:
+                    step = -1 if key == Qt.Key_Up else 1
+                    index = max(0, min(len(self.result_notes) - 1, self.selected_result + step))
+                    self.select_result(index)
+                return True
+        return super().eventFilter(watched, event)
 
     def resizeEvent(self,event):
         super().resizeEvent(event)
@@ -289,9 +555,10 @@ class Capture(QDialog):
         self.resize(480,300)
         layout=QVBoxLayout(self)
         layout.setContentsMargins(24,18,24,16)
-        layout.addWidget(label('记点什么。',23,'#425D4D',True))
+        layout.addWidget(label('随手记',26,'#20283A',True))
         self.editor=Editor()
-        self.editor.setPlaceholderText('灵感跑得很快，先把它留下。')
+        self.editor.setPlaceholderText('写下想法…')
+        self.editor.setObjectName('captureEditor')
         self.editor.setHtml(controller.store.get_meta('capture_draft',''))
         self.draft_timer=QTimer(self)
         self.draft_timer.setSingleShot(True)
@@ -300,9 +567,9 @@ class Capture(QDialog):
         self.editor.textChanged.connect(lambda:self.draft_timer.start())
         layout.addWidget(self.editor,1)
         row=QHBoxLayout()
-        row.addWidget(label('Esc 暂收起 · 内容会留在这里',11,'#91998B'))
+        row.addWidget(label('Esc 收起并保留草稿',12,'#566174'))
         row.addStretch()
-        row.addWidget(button('放进抽屉  ↵',self.capture,'Ctrl+Enter',True))
+        row.addWidget(button('保存  Ctrl+Enter',self.capture,'Ctrl+Enter',True))
         layout.addLayout(row)
         self.shortcut=QShortcut(QKeySequence('Ctrl+Return'),self)
         self.shortcut.activated.connect(self.capture)
@@ -339,8 +606,7 @@ class Settings(QDialog):
         self.resize(670,610)
         layout=QVBoxLayout(self)
         layout.setContentsMargins(28,24,28,22)
-        layout.addWidget(label('让纸片合你的习惯',24,'#3E5140',True))
-        layout.addWidget(label('安静地待在桌面，其他的由你决定。',12,'#8A9383'))
+        layout.addWidget(label('偏好设置',26,'#20283A',True))
         tabs=QTabWidget()
         layout.addWidget(tabs,1)
         self.fields={}
@@ -406,7 +672,7 @@ class Settings(QDialog):
             data.addRow(button(text,callback))
         data.addRow(label('导入会新增纸片，不覆盖已有内容。\n回收站自动保留 30 天；版本快照最多保留 30 个。',11,'#899180'))
         about=page('关于')
-        about.addRow(label('小纸片  1.0.3',24,'#425D4D',True))
+        about.addRow(label(f'小纸片  {__version__}',24,'#425D4D',True))
         about.addRow(label('桌面上的一张纸。\n\n无需登录，无需联网。\n文字、窗口位置和偏好都保存在本机。\n\nPython · Qt for Python · SQLite',13,'#7B8774'))
         row=QHBoxLayout()
         row.addStretch()

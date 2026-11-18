@@ -4,9 +4,17 @@
 
 它更像桌面上的一张纸，而不是复杂的笔记管理软件：按下快捷键，马上写下想法；写完离开，内容自动保存。
 
-[English README](README_EN.md) · [使用说明](使用说明.md) · [最新 Windows 版](release/1.0.3/小纸片-Windows-x64.zip)
+[English README](README_EN.md) · [使用说明](使用说明.md) · [最新 Windows 版](https://github.com/Flowerrr2/slip-of-paper/releases/download/v1.1.2/Slip-of-Paper-1.1.2-Windows-x64.zip)
 
 ![小纸片管理器](artifacts/manager.png)
+
+## 使用截图
+
+<table>
+<tr><td valign="top">桌面待办<br><img src="artifacts/note.png" alt="桌面待办" width="390"></td><td valign="top">快捷记录草稿<br><img src="artifacts/capture.png" alt="快捷记录草稿" width="390"></td></tr>
+<tr><td valign="top">设置一次性提醒<br><img src="artifacts/reminder.png" alt="设置一次性提醒" width="390"></td><td valign="top">选择提醒日期<br><img src="artifacts/reminder-calendar.png" alt="选择提醒日期" width="390"></td></tr>
+<tr><td valign="top">按标签搜索并用键盘选中结果<br><img src="artifacts/search.png" alt="按标签搜索并用键盘选中结果" width="390"></td><td valign="top">设置开机启动与窗口行为<br><img src="artifacts/settings.png" alt="设置开机启动与窗口行为" width="390"></td></tr>
+</table>
 
 ## 功能
 
@@ -15,6 +23,7 @@
 - 快速输入：`Ctrl + Alt + N` 新建，`Ctrl + Alt + Space` 快速记录
 - 待办和轻量格式：`[]`、`#`、`-`、分割线、粗体、删除线、高亮和链接
 - 便签抽屉：搜索、收藏、标签、归档和 30 天回收站
+- 一次性本地提醒：从便签或抽屉设定时间，托盘通知到期事项
 - 桌面控制：置顶、透明度、字号、Ctrl + 滚轮调字号、放回抽屉
 - Windows 托盘和全局快捷键，支持显示 / 隐藏全部便签
 - 本地保护：历史版本、每日备份、导入导出和异常退出恢复
@@ -22,10 +31,10 @@
 
 ## 下载和运行
 
-推荐下载 [小纸片-Windows-x64.zip](release/1.0.3/小纸片-Windows-x64.zip)，解压后运行：
+推荐下载 [Slip-of-Paper-1.1.2-Windows-x64.zip](https://github.com/Flowerrr2/slip-of-paper/releases/download/v1.1.2/Slip-of-Paper-1.1.2-Windows-x64.zip)，解压后运行：
 
 ```text
-release/1.0.3/小纸片/小纸片.exe
+小纸片/小纸片.exe
 ```
 
 程序是免安装目录版。运行时请保留整个 `小纸片` 文件夹，不要只复制 exe。也可以双击仓库根目录的 `启动小纸片.cmd`。
@@ -72,8 +81,8 @@ python -m venv .venv
 构建最新 release：
 
 ```powershell
-.\.venv\Scripts\python.exe tools\build.py --output release/1.0.3
-.\.venv\Scripts\python.exe tools\check_release.py --output release/1.0.3
+.\.venv\Scripts\python.exe tools\build.py --output release/1.1.2
+.\.venv\Scripts\python.exe tools\check_release.py --output release/1.1.2
 ```
 
 ## 项目结构
@@ -91,9 +100,9 @@ python -m venv .venv
 
 ## 当前版本
 
-1.0.3 包含桌面便签的「放回抽屉」快捷按钮。当前测试覆盖 23 项场景，包括自动保存、字体与横线对齐、Ctrl + 滚轮调字号、归档恢复、单实例、重启恢复和 SQLite 完整性检查。
+1.1.2 更新了抽屉、桌面便签和随手记的视觉与操作反馈。1.1.0 新增一次性本地提醒、搜索命中摘要和键盘打开结果。便签较多时，抽屉会按滚动位置逐批加载卡片。
 
-当前仍未包含提醒、图片便签、OCR、云同步、Windows Hello 锁定和 AI 整理等 V2 功能。
+循环提醒、图片便签、OCR、云同步、Windows Hello 锁定和 AI 整理留待后续版本。
 
 ## 许可证和第三方组件
 
